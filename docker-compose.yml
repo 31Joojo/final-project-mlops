@@ -1,0 +1,34 @@
+services:
+  ### Backend implementation
+  api:
+    build:
+      context: ./apps/api
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+    ### Environment variables
+    environment:
+      MODEL_STAGE: "${MODEL_STAGE:-dev}"
+      MODEL_VERSION: "${MODEL_VERSION:-0}"
+      CORS_ALLOW_ORIGINS: "${CORS_ALLOW_ORIGINS:-http://localhost:3000}"
+
+    ### Healthcheck to verify if everything is working well
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ### Web service to build the frontend
+  web:
+    build:
+      context: ./apps/web
+    ports:
+      - "${WEB_PORT:-3000}:80"
+
+    ### URL to use to make the predictions
+    environment:
+      API_URL: "${API_URL:-http://localhost:8000}"
+    depends_on:
+      api:
+        condition: service_healthy
