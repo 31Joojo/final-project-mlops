@@ -42,40 +42,62 @@ async def lifespan(app: FastAPI):
     ### Application runs after middleware setup
     yield
 
-### Initialize application
-app = FastAPI(title="MLOps Final Project", lifespan=lifespan)
-
-### Helper : health()
-@app.get("/health")
-def health() -> dict:
+### Function : create_app()
+def create_app() -> FastAPI:
     """
-    Provides a healthcheck endpoint to verify that the API is running correctly.
+    Creates and configures the FastAPI application with middleware and API routes.
 
     :return:
-        dict: a dictionary containing the service status
+        FastAPI: fully configured FastAPI application instance
     """
-    ### Healthcheck endpoint used by Docker and monitoring systems
-    return {"status": "ok"}
+    settings = get_settings()
 
-### Function : predict()
-@app.post("/predict", response_model=PredictResponse)
-def predict(payload: PredictRequest, settings: Settings = Depends(get_settings)) -> PredictResponse:
-    """
-    Executes a prediction request using the configured model settings.
+    ### Initialize application
+    app = FastAPI(title="MLOps Final Project")
 
-    :param:
-        payload PredictRequest: validated input features used for inference:
-        settings Settings: runtime configuration injected from environment variables
-    :return:
-        PredictResponse: prediction result including model metadata
-    """
-    ### Execute inference using the current model configuration
-    pred, proba = dummy_classifier(payload)
-
-    ### Returns response
-    return PredictResponse(
-        prediction=pred,
-        probability=round(proba, 6),
-        model_stage=settings.model_stage,
-        model_version=settings.model_version,
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_parse_origins(settings.cors_allow_origins),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
+
+    ### Helper : health()
+    @app.get("/health")
+    def health() -> dict:
+        """
+        Provides a healthcheck endpoint to verify that the API is running correctly.
+
+        :return:
+            dict: a dictionary containing the service status
+        """
+        ### Healthcheck endpoint used by Docker and monitoring systems
+        return {"status": "ok"}
+
+    ### Function : predict()
+    @app.post("/predict", response_model=PredictResponse)
+    def predict(payload: PredictRequest, settings: Settings = Depends(get_settings)) -> PredictResponse:
+        """
+        Executes a prediction request using the configured model settings.
+
+        :param:
+            payload PredictRequest: validated input features used for inference:
+            settings Settings: runtime configuration injected from environment variables
+        :return:
+            PredictResponse: prediction result including model metadata
+        """
+        ### Execute inference using the current model configuration
+        pred, proba = dummy_classifier(payload)
+
+        ### Returns response
+        return PredictResponse(
+            prediction=pred,
+            probability=round(proba, 6),
+            model_stage=settings.model_stage,
+            model_version=settings.model_version,
+        )
+
+    return app
+
+app = create_app()
