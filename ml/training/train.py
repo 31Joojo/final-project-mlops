@@ -212,6 +212,9 @@ def main() -> None:
         help="Tag to identify runs",
     )
 
+    parser.add_argument("--tracking-uri", type=str, default="")
+    parser.add_argument("--no-register", action="store_true")
+
     args = parser.parse_args()
 
     experiment_name = get_env("MLFLOW_EXPERIMENT_NAME", "train-chocolate-sales") or "train-chocolate-sales"
@@ -224,6 +227,9 @@ def main() -> None:
     registry_uri = get_env("MLFLOW_REGISTRY_URI")
     if registry_uri:
         mlflow.set_registry_uri(registry_uri)
+
+    if args.tracking_uri:
+        mlflow.set_tracking_uri(args.tracking_uri)
 
     mlflow.set_experiment(experiment_name)
 
@@ -327,13 +333,21 @@ def main() -> None:
         input_example = X_train.head(5)
 
         ### Log and register model in mlflow model registry
-        mlflow.sklearn.log_model(
-            sk_model=pipe,
-            name="model",
-            registered_model_name=args.model_name,
-            signature=signature,
-            input_example=input_example,
-        )
+        if args.no_register:
+            mlflow.sklearn.log_model(
+                sk_model=pipe,
+                name="model",
+                signature=signature,
+                input_example=input_example,
+            )
+        else:
+            mlflow.sklearn.log_model(
+                sk_model=pipe,
+                name="model",
+                registered_model_name=args.model_name,
+                signature=signature,
+                input_example=input_example,
+            )
 
         run_id = mlflow.active_run().info.run_id
         print("MLflow run logged and model registered")
