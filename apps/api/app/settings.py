@@ -11,8 +11,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Optional
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DEFAULT_ENV_FILE = _REPO_ROOT / ".env"
 
 ### ------------------------------- Class ------------------------------- ###
 ### Class : Settings
@@ -57,6 +61,8 @@ class Settings(BaseSettings):
         env_prefix="",
         case_sensitive=False,
         protected_namespaces=(),
+        env_file=str(_DEFAULT_ENV_FILE),
+        env_file_encoding="utf-8",
     )
 
 ### ------------------------------ Helpers ------------------------------ ###
