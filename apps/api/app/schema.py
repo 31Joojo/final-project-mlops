@@ -9,9 +9,10 @@ Authors:
 ### Modules importation
 from __future__ import annotations
 
+from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
-### ------------------------------- Class ------------------------------- ###
+### ------------------------------ Classes ------------------------------ ###
 ### Class : PredictRequest
 class PredictRequest(BaseModel):
     """
@@ -50,8 +51,10 @@ class PredictResponse(BaseModel):
         PredictResponse: structured response containing prediction results and model metadata
     """
     prediction: int
-    probability: float
+    probability: Optional[float] = None
+
+    model_name: str
     model_stage: str
-    model_version: str
+    model_version: Optional[str] = None
 
     model_config = ConfigDict(protected_namespaces=())
