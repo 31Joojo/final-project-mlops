@@ -25,12 +25,14 @@ def test_settings_from_env(monkeypatch):
     """
 
     ### Set temporary environment variables
-    monkeypatch.setenv("MODEL_STAGE", "staging")
-    monkeypatch.setenv("MODEL_VERSION", "42")
+    monkeypatch.setenv("MODEL_STAGE", "Staging")
+    monkeypatch.setenv("MODEL_NAME", "chocolate_sales_logreg")
+    monkeypatch.setenv("ALLOW_MODEL_RELOAD", "1")
 
     ### Instantiate settings to load environment values
     s = Settings()
 
     ### Assert values are read from environment instead of defaults
-    assert s.model_stage == "staging"
-    assert s.model_version == "42"
+    assert s.model_stage == "Staging"
+    assert s.model_name == "chocolate_sales_logreg"
+    assert s.allow_model_reload is True

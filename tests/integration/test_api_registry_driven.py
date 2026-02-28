@@ -1,5 +1,5 @@
 """
-tests/integration/test_predict.py
+tests/integration/test_api_registry_driven.py
 
 Authors:
     BAUDET Quentin
@@ -7,18 +7,17 @@ Authors:
     LARMAILLARD-NOIREN Joris
 """
 ### Modules importation
-import pytest
 import mlflow.sklearn
 from fastapi.testclient import TestClient
 
-from app.settings import get_settings
 from app.main import app
+from app.settings import get_settings
 
 ### ------------------------------ Classes ------------------------------ ###
 ### Class : FakeModel
 class FakeModel:
     """
-    Mock mlflow model used to simulate prediction behavior in integration tests.
+    Mock mlflow model used to simulate registry-loaded model behavior.
 
     :param:
         None
@@ -34,43 +33,40 @@ class FakeModel:
         Simulates deterministic class predictions.
 
         :param:
-            X Any: input features
+            X Any: input features passed to the model
 
         :return:
             list[int]: predicted class labels
         """
-        ### Return constant class label
         return [1] * len(X)
 
-    ### Method : predict_proba()
+    ### Method : predict_proba
     def predict_proba(self, X):
         """
         Simulates probability predictions for binary classification.
 
         :param:
-            X Any: input features
+            X Any: input features passed to the model
 
         :return:
-            list[list[float]]: probability distribution per sample
+            list[list[float]]: class probability scores
         """
-        ### Return fixed probability distribution
         return [[0.1, 0.9] for _ in range(len(X))]
 
 ### ------------------------------- Tests ------------------------------- ###
-### Test : test_predict_ok_returns_expected_shape()
-@pytest.mark.integration
-def test_predict_ok_returns_expected_shape(monkeypatch):
+### Test : test_health_and_predict_mocked_registry_load()
+def test_health_and_predict_mocked_registry_load(monkeypatch):
     """
-    Verifies that the predict endpoint returns a correctly structured response
-    including model metadata when registry loading is mocked.
+    Verifies that the API loads a model from the registry
+    and correctly serves health and prediction endpoints.
 
     :param:
         monkeypatch pytest.MonkeyPatch: fixture used to override environment variables and mlflow loading
 
     :return:
-        None: asserts correct response structure and values
+        None: asserts successful health check and prediction behavior
     """
-    ### Configure environment variables for model selection
+    ### Set environment variables for model selection
     monkeypatch.setenv("MODEL_NAME", "chocolate_sales_logreg")
     monkeypatch.setenv("MODEL_STAGE", "Staging")
 
@@ -86,6 +82,17 @@ def test_predict_ok_returns_expected_shape(monkeypatch):
     monkeypatch.setattr(mlflow.sklearn, "load_model", lambda uri: FakeModel())
 
     with TestClient(app) as client:
+        ### Verify health endpoint
+        r = client.get("/health")
+        assert r.status_code == 200
+        body = r.json()
+
+        assert body["status"] == "ok"
+        assert body["loaded"] is True
+        assert body["model_name"] == "chocolate_sales_logreg"
+        assert body["model_stage"] == "Staging"
+
+        ### Verify prediction endpoint
         payload = {
             "sales_person": "Alice",
             "country": "FR",
@@ -94,24 +101,11 @@ def test_predict_ok_returns_expected_shape(monkeypatch):
             "date": "2024-02-01",
         }
 
-        ### Call predict endpoint
-        r = client.post("/predict", json=payload)
-        assert r.status_code == 200
+        r2 = client.post("/predict", json=payload)
+        assert r2.status_code == 200
 
-        data = r.json()
-
-        ### Validate response structure
-        assert set(data.keys()) == {
-            "prediction",
-            "probability",
-            "model_name",
-            "model_stage",
-            "model_version",
-        }
-
-        ### Validate metadata correctness
-        assert data["model_name"] == "chocolate_sales_logreg"
-        assert data["model_stage"] == "Staging"
-
-        ### Validate prediction
-        assert data["prediction"] in (0, 1)
+        out = r2.json()
+        assert out["prediction"] == 1
+        assert out["probability"] == 0.9
+        assert out["model_name"] == "chocolate_sales_logreg"
+        assert out["model_stage"] == "Staging"

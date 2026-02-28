@@ -9,9 +9,14 @@ Authors:
 ### Modules importation
 from __future__ import annotations
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
-### Optional
 from functools import lru_cache
+from typing import Optional
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_DEFAULT_ENV_FILE = _REPO_ROOT / ".env"
 
 ### ------------------------------- Class ------------------------------- ###
 ### Class : Settings
@@ -21,16 +26,34 @@ class Settings(BaseSettings):
 
     :param:
         app_name str: name of the API application
+        model_name str: mlflow registered model name
         model_stage str: mlflow model stage to load
-        model_version str: specific mlflow model version to load
+        mlflow_tracking_uri Optional[str]: mlflow tracking and registry URI
+        mlflow_tracking_username Optional[str]: username for mlflow authentication
+        mlflow_tracking_password Optional[str]: password for mlflow authentication
+        allow_model_reload bool: enables runtime model reloading
+        mlops_disable_model_load bool: disables automatic model loading
         cors_allow_origins str: allowed CORS origins for frontend requests
 
     :returns:
         Settings: an instance containing the resolved configuration values
     """
-    app_name: str = "MLOps Final Project API"
-    model_stage: str = "dev"
-    model_version: str = "0"
+    app_name: str = "MLOps Final Project"
+
+    ### Model selector
+    model_name: str = "chocolate_sales_logreg"
+    model_stage: str = "Staging"
+
+    ### Mlflow and dagshub connection
+    mlflow_tracking_uri: Optional[str] = None
+    mlflow_tracking_username: Optional[str] = None
+    mlflow_tracking_password: Optional[str] = None
+
+    ### Controls
+    allow_model_reload: bool = False
+    mlops_disable_model_load: bool = False
+
+    ### Web
     cors_allow_origins: str = "http://localhost:3000"
 
     ### Avoid warnings with fields starting with "model_"
@@ -38,6 +61,9 @@ class Settings(BaseSettings):
         env_prefix="",
         case_sensitive=False,
         protected_namespaces=(),
+        env_file=str(_DEFAULT_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
 ### ------------------------------ Helpers ------------------------------ ###
