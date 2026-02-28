@@ -87,11 +87,11 @@ def test_predict_ok_returns_expected_shape(monkeypatch):
 
     with TestClient(app) as client:
         payload = {
-            "quantity": 10,
-            "unit_price": 15.0,
-            "discount": 0.1,
+            "sales_person": "Alice",
             "country": "FR",
             "product": "Dark Chocolate",
+            "boxes_shipped": 10,
+            "date": "2024-02-01",
         }
 
         ### Call predict endpoint

@@ -94,11 +94,11 @@ def test_health_and_predict_mocked_registry_load(monkeypatch):
 
         ### Verify prediction endpoint
         payload = {
-            "quantity": 10,
-            "unit_price": 2.5,
-            "discount": 0.1,
+            "sales_person": "Alice",
             "country": "FR",
-            "product": "Dark",
+            "product": "Dark Chocolate",
+            "boxes_shipped": 10,
+            "date": "2024-02-01",
         }
 
         r2 = client.post("/predict", json=payload)
