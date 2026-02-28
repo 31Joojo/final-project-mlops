@@ -28,9 +28,11 @@ def _base_url() -> str:
         str: base URL of the staging API without trailing slash
     """
     ### Read base URL from environment
-    base = os.environ["STAGING_API_BASE_URL"].rstrip("/")
+    base = os.getenv("STAGING_API_BASE_URL")
+    if not base:
+        pytest.skip("STAGING_API_BASE_URL not set: skipping live E2E test")
 
-    return base
+    return base.rstrip("/")
 
 ### Helper : _pick()
 def _pick(options: dict, keys: list[str], fallback):
