@@ -96,7 +96,13 @@ def test_predictor_raises_if_model_not_loaded():
     ### Initialize predictor without model
     p = Predictor()
 
-    req = PredictRequest(quantity=10, unit_price=2.5, discount=0.1, country="FR", product="Dark")
+    req = PredictRequest(
+        sales_person="Alice",
+        country="FR",
+        product="Dark",
+        boxes_shipped=10,
+        date="2024-02-01",
+    )
 
     ### Expect error when model is not loaded
     with pytest.raises(ModelNotLoadedError):
@@ -119,11 +125,11 @@ def test_predictor_predict_and_proba():
     p.set_model(FakeLoadedModel())
 
     req = PredictRequest(
-        quantity=10,
-        unit_price=2.5,
-        discount=0.1,
+        sales_person="Alice",
         country="FR",
         product="Dark",
+        boxes_shipped=10,
+        date="2024-02-01",
     )
 
     ### Make prediction

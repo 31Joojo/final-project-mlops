@@ -24,19 +24,19 @@ def test_predict_request_accepts_valid_payload():
     """
     ### Create valid request instance
     req = PredictRequest(
-        quantity=10,
-        unit_price=12.5,
-        discount=0.1,
+        sales_person="Alice",
         country="FR",
         product="Dark Chocolate",
+        boxes_shipped=10,
+        date="2024-02-01",
     )
 
     ### Assert fields are correctly assigned
-    assert req.quantity == 10
-    assert req.unit_price == 12.5
-    assert req.discount == 0.1
+    assert req.sales_person == "Alice"
     assert req.country == "FR"
     assert req.product == "Dark Chocolate"
+    assert req.boxes_shipped == 10
+    assert req.date == "2024-02-01"
 
 ### Test : test_predict_request_rejects_out_of_bounds_values()
 @pytest.mark.unit
