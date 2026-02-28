@@ -191,6 +191,66 @@ def create_app() -> FastAPI:
             logger.exception("Prediction failed")
             raise HTTPException(status_code=400, detail=str(e))
 
+    @app.get("/options")
+    def options():
+        """
+        Returns available categorical feature values extracted from the trained model pipeline.
+
+        The endpoint inspects the loaded preprocessing pipeline
+        to dynamically retrieve known categories for dropdown population.
+
+        :param:
+            None
+
+        :return:
+            dict: available sales_persons, countries, and products
+        """
+        predictor: Predictor = app.state.predictor
+
+        ### Ensure model is loaded before accessing pipeline
+        if not predictor.loaded:
+            raise HTTPException(status_code=503, detail="Model not loaded")
+
+        ### Access underlying sklearn model
+        model = predictor._loaded.model
+        preprocess = None
+
+        ### Extract preprocessing step from sklearn Pipeline
+        if hasattr(model, "named_steps") and "preprocess" in model.named_steps:
+            preprocess = model.named_steps["preprocess"]
+
+        ### If no preprocessing pipeline found return empty options
+        if preprocess is None:
+            return {"sales_persons": [], "countries": [], "products": []}
+
+        ### Locate categorical transformer inside ColumnTransformer
+        cat_pipe = None
+        for name, transformer, cols in preprocess.transformers_:
+            if name == "cat":
+                cat_pipe = transformer
+                cat_cols = cols
+                break
+
+        ### If categorical pipeline missing return empty
+        if cat_pipe is None:
+            return {"sales_persons": [], "countries": [], "products": []}
+
+        ### Retrieve OneHotEncoder and its learned categories
+        ohe = cat_pipe.named_steps.get("onehot")
+        if ohe is None or not hasattr(ohe, "categories_"):
+            return {"sales_persons": [], "countries": [], "products": []}
+
+        ### Map categorical columns to learned categories
+        cats = ohe.categories_
+        mapping = dict(zip(cat_cols, cats))
+
+        ### Return sorted values for frontend dropdowns
+        return {
+            "sales_persons": sorted([str(x) for x in mapping.get("Sales Person", [])]),
+            "countries": sorted([str(x) for x in mapping.get("Country", [])]),
+            "products": sorted([str(x) for x in mapping.get("Product", [])]),
+        }
+
     @app.post("/reload-model")
     def reload_model(settings: Settings = Depends(get_settings)) -> dict:
         """
