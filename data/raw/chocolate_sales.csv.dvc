@@ -1,0 +1,5 @@
+outs:
+- md5: 80df995998be4e68e613448a7579b57f
+  size: 212462
+  hash: md5
+  path: chocolate_sales.csv

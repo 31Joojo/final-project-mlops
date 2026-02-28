@@ -1,17 +1,14 @@
 import { NextResponse } from "next/server";
 
-export async function POST(req: Request) {
+export async function GET() {
   const apiBase = process.env.API_URL;
   if (!apiBase) {
     return NextResponse.json({ error: "API_URL is not set" }, { status: 500 });
   }
 
-  const payload = await req.json();
-
-  const upstream = await fetch(`${apiBase}/predict`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+  const upstream = await fetch(`${apiBase}/options`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
   });
 
   const text = await upstream.text();
@@ -19,6 +16,6 @@ export async function POST(req: Request) {
 
   return new NextResponse(text, {
     status: upstream.status,
-    headers: { "content-type": contentType }
+    headers: { "content-type": contentType },
   });
 }
