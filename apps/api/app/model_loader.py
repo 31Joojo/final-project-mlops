@@ -15,6 +15,7 @@ from typing import Any, Optional
 
 import mlflow
 from mlflow.tracking import MlflowClient
+from mlflow.exceptions import MlflowException
 import mlflow.sklearn
 
 from .settings import Settings
@@ -61,6 +62,48 @@ class LoadedModel:
     meta: ModelMeta
 
 ### ------------------------------ Helpers ------------------------------ ###
+### Helper : _candidate_model_uris()
+def _candidate_model_uris(model_name: str, model_stage: str) -> list[str]:
+    """
+    Builds a prioritized list of mlflow model URIs based on the provided stage or version.
+
+    :param:
+        model_name str: registered mlflow model name
+        model_stage str: stage, alias, or version identifier
+
+    :return:
+        list[str]: ordered list of candidate model URIs to try
+    """
+    ### Normalize stage input
+    s = (model_stage or "").strip()
+    if not s:
+        raise ValueError("MODEL_STAGE is empty")
+
+    uris = []
+
+    ### Explicit alias format
+    if s.startswith("@"):
+        uris.append(f"models:/{model_name}{s}")
+        return uris
+
+    ### Direct version reference
+    if s.isdigit():
+        uris.append(f"models:/{model_name}/{s}")
+        return uris
+
+    ## Standard mlflow stage syntax
+    uris.append(f"models:/{model_name}/{s}")
+
+    ### Fallback for DagsHub-style alias syntax
+    if s in {"Staging", "Production"}:
+        uris.append(f"models:/{model_name}@{s.lower()}")
+    else:
+        ### Case : user already passed staging or production
+        if s.lower() in {"staging", "production"}:
+            uris.append(f"models:/{model_name}@{s.lower()}")
+
+    return uris
+
 ### Helper : build_model_uri()
 def build_model_uri(model_name: str, model_stage: str) -> str:
     """
@@ -141,49 +184,62 @@ def _try_get_model_version(settings: Settings, model_name: str, model_stage: str
 ### Helper : load_model_from_registry()
 def load_model_from_registry(settings: Settings, prefer_sklearn: bool = True) -> LoadedModel:
     """
-    Loads a model from mlflow model registry based on configured model name and stage.
+    Loads a model from mlflow Model Registry by trying multiple candidate URIs.
 
     :param:
-        settings Settings: application configuration with registry parameters
+        settings Settings: runtime configuration containing model name and stage
         prefer_sklearn bool: whether to attempt sklearn flavor loading first
 
     :return:
         LoadedModel: loaded model object bundled with metadata
+
+    :raises:
+        MlflowException: if all candidate URIs fail
     """
     configure_mlflow(settings)
 
-    ### Ensure mlflow is configured before loading model
     model_name = settings.model_name
     model_stage = settings.model_stage
-    model_uri = build_model_uri(model_name, model_stage)
 
-    model = None
-    flavor = "pyfunc"
+    candidates = _candidate_model_uris(model_name, model_stage)
+    last_exc: Exception | None = None
 
-    ### Try loading via sklearn flavor first
-    if prefer_sklearn:
+    ### Try candidate URIs in priority order
+    for model_uri in candidates:
         try:
-            model = mlflow.sklearn.load_model(model_uri)
-            flavor = "sklearn"
-            logger.info("Loaded model via sklearn flavor: %s", model_uri)
+            model = None
+            flavor = "pyfunc"
 
-        ### Fallback to generic pyfunc flavor if sklearn loading fails
-        except Exception:
-            logger.info("Could not load sklearn flavor, falling back to pyfunc: %s", model_uri, exc_info=True)
+            ### Attempt sklearn flavor loading first
+            if prefer_sklearn:
+                try:
+                    import mlflow.sklearn
+                    model = mlflow.sklearn.load_model(model_uri)
+                    flavor = "sklearn"
+                except Exception:
+                    model = None
 
-    ### Retrieve model version metadata
-    if model is None:
-        model = mlflow.pyfunc.load_model(model_uri)
-        flavor = "pyfunc"
-        logger.info("Loaded model via pyfunc flavor: %s", model_uri)
+            ### Fallback to generic pyfunc flavor
+            if model is None:
+                model = mlflow.pyfunc.load_model(model_uri)
+                flavor = "pyfunc"
 
-    version = _try_get_model_version(settings, model_name, model_stage)
+            version = _try_get_model_version(settings, model_name, model_stage)
 
-    meta = ModelMeta(
-        model_name=model_name,
-        model_stage=model_stage,
-        model_version=version,
-        model_uri=model_uri,
-        flavor=flavor,
-    )
-    return LoadedModel(model=model, meta=meta)
+            ### Capture metadata including actual URI used
+            meta = ModelMeta(
+                model_name=model_name,
+                model_stage=model_stage,
+                model_version=version,
+                model_uri=model_uri,
+                flavor=flavor,
+            )
+            return LoadedModel(model=model, meta=meta)
+
+        ### All candidates failed and propagate failure
+        except Exception as e:
+            last_exc = e
+            logger.info("Model load failed for uri=%s (will try next).", model_uri, exc_info=True)
+
+    ### None worked
+    raise MlflowException(f"All candidate URIs failed: {candidates}") from last_exc

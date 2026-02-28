@@ -63,6 +63,7 @@ class Settings(BaseSettings):
         protected_namespaces=(),
         env_file=str(_DEFAULT_ENV_FILE),
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
 ### ------------------------------ Helpers ------------------------------ ###

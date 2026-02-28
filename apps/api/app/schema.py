@@ -16,23 +16,23 @@ from pydantic import BaseModel, ConfigDict, Field
 ### Class : PredictRequest
 class PredictRequest(BaseModel):
     """
-    Defines the input schema for prediction requests sent to the API.
+    Defines the validated input schema for prediction requests sent to the API.
 
     :param:
-        quantity int: number of items sold
-        unit_price float: price per unit
-        discount float: discount rate applied to the sale in range [0, 1]
-        country str: country name or code
+        sales_person str: name of the salesperson associated with the transaction
+        country str: country name or ISO code
         product str: product name
+        boxes_shipped int: number of boxes shipped
+        date str: transaction date formatted as YYYY-MM-DD
 
     :returns:
         PredictRequest: a validated request object containing model input features
     """
-    quantity: int = Field(..., ge=1, le=1_000_000, description="Number of items sold")
-    unit_price: float = Field(..., ge=0.0, le=1_000_000.0, description="Unit price")
-    discount: float = Field(0.0, ge=0.0, le=1.0, description="Discount rate in [0,1]")
-    country: str = Field(..., min_length=2, max_length=56, description="Country name/code")
-    product: str = Field(..., min_length=1, max_length=100, description="Product name")
+    sales_person: str = Field(..., min_length=1, max_length=120)
+    country: str = Field(..., min_length=2, max_length=56)
+    product: str = Field(..., min_length=1, max_length=120)
+    boxes_shipped: int = Field(..., ge=0, le=1_000_000)
+    date: str = Field(..., description="YYYY-MM-DD")
 
     model_config = ConfigDict(protected_namespaces=())
 

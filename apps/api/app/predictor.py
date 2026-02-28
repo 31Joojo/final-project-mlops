@@ -128,8 +128,23 @@ class Predictor:
         if not self._loaded:
             raise ModelNotLoadedError("Model is not loaded")
 
-        ### Convert request into single-row DataFrame
-        df = pd.DataFrame([req.model_dump()])
+        ### Build feature set expected by the trained pipeline
+        try:
+            dt = pd.to_datetime(req.date, errors="raise")
+        except Exception as e:
+            raise ValueError(f"Invalid date format '{req.date}'. Expected YYYY-MM-DD.") from e
+
+        row = {
+            "Sales Person": req.sales_person,
+            "Country": req.country,
+            "Product": req.product,
+            "Boxes Shipped": req.boxes_shipped,
+            "year": int(dt.year),
+            "month": int(dt.month),
+            "dayofweek": int(dt.dayofweek),
+        }
+
+        df = pd.DataFrame([row])
 
         model = self._loaded.model
 
