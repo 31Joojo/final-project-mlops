@@ -95,9 +95,7 @@ def test_staging_health_options_predict():
 
     ### Stable date features
     d = dt.date(2026, 2, 27)
-    year = d.year
-    month = d.month
-    dayofweek = d.weekday()
+    date_str = d.isoformat()
 
     ### Try multiple payload formats for compatibility
     payload_space_keys = {
@@ -105,18 +103,15 @@ def test_staging_health_options_predict():
         "Country": country,
         "Product": product,
         "Boxes Shipped": 10,
-        "year": year,
-        "month": month,
-        "dayofweek": dayofweek,
+        "date": date_str,
     }
+
     payload_snake_case = {
         "sales_person": sales_person,
         "country": country,
         "product": product,
         "boxes_shipped": 10,
-        "year": year,
-        "month": month,
-        "dayofweek": dayofweek,
+        "date": date_str,
     }
 
     ### Test /predict endpoint

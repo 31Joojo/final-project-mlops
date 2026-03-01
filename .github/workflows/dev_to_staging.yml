@@ -95,7 +95,7 @@ jobs:
                 sys.exit(0)
             except Exception as e:
               last = e
-            print("⏳ Waiting for API...", health, options)
+            print(" Waiting for API...", health, options)
             time.sleep(poll)
 
           print("Timeout waiting for staging API")
