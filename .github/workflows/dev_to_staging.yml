@@ -16,9 +16,19 @@ jobs:
 
     env:
       STAGING_API_BASE_URL: ${{ secrets.STAGING_API_BASE_URL }}
+      STAGING_API_DEPLOY_HOOK: ${{ secrets.STAGING_API_DEPLOY_HOOK }}
+      STAGING_WEB_DEPLOY_HOOK: ${{ secrets.STAGING_WEB_DEPLOY_HOOK }}
+
       E2E_HTTP_TIMEOUT: "12"
       E2E_MAX_WAIT_SECONDS: "420"
       E2E_POLL_SECONDS: "5"
+
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+
+      MODEL_NAME: ${{ secrets.STAGING_MODEL_NAME }}
+      MODEL_STAGE: ${{ secrets.STAGING_MODEL_STAGE }}
 
     steps:
       - name: Checkout
@@ -42,19 +52,19 @@ jobs:
           pytest -q -m "not e2e"
 
       - name: Trigger Render deploy (API)
-        if: ${{ secrets.STAGING_API_DEPLOY_HOOK != '' }}
+        if: ${{ env.STAGING_API_DEPLOY_HOOK != '' }}
         run: |
-          curl -fsS -X POST "${{ secrets.STAGING_API_DEPLOY_HOOK }}"
+          curl -fsS -X POST "${STAGING_API_DEPLOY_HOOK}"
 
       - name: Trigger Render deploy (Web)
-        if: ${{ secrets.STAGING_WEB_DEPLOY_HOOK != '' }}
+        if: ${{ env.STAGING_WEB_DEPLOY_HOOK != '' }}
         run: |
-          curl -fsS -X POST "${{ secrets.STAGING_WEB_DEPLOY_HOOK }}"
+          curl -fsS -X POST "${STAGING_WEB_DEPLOY_HOOK}"
 
-      - name: Fail early if STAGING_API_BASE_URL is missing (optional)
-        if: ${{ secrets.STAGING_API_BASE_URL == '' }}
+      - name: Skip live E2E if STAGING_API_BASE_URL is missing
+        if: ${{ env.STAGING_API_BASE_URL == '' }}
         run: |
-          echo "STAGING_API_BASE_URL is not set yet. Skipping live E2E."
+          echo "STAGING_API_BASE_URL is not set. Skipping live E2E."
           exit 0
 
       - name: Wait until staging API is ready (/health + /options)
@@ -81,16 +91,16 @@ jobs:
           while time.time() - start < max_wait:
             try:
               if ok(health) and ok(options):
-                print("Ok - API ready:", base)
+                print("API ready:", base)
                 sys.exit(0)
             except Exception as e:
               last = e
-            print("Waiting for API...", health, options)
+            print("⏳ Waiting for API...", health, options)
             time.sleep(poll)
 
           print("Timeout waiting for staging API")
           if last:
-            print("last error:", repr(last))
+            print("Last error:", repr(last))
           sys.exit(1)
           PY
 
