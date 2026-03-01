@@ -15,8 +15,11 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT = _THIS_FILE.parents[3] if len(_THIS_FILE.parents) > 3 else _THIS_FILE.parents[-1]
+
 _DEFAULT_ENV_FILE = _REPO_ROOT / ".env"
+_ENV_FILE = str(_DEFAULT_ENV_FILE) if _DEFAULT_ENV_FILE.exists() else None
 
 ### ------------------------------- Class ------------------------------- ###
 ### Class : Settings
@@ -61,7 +64,7 @@ class Settings(BaseSettings):
         env_prefix="",
         case_sensitive=False,
         protected_namespaces=(),
-        env_file=str(_DEFAULT_ENV_FILE),
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )
