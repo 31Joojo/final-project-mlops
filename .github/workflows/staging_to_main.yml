@@ -1,0 +1,87 @@
+name: staging-to-main (prod deploy + live e2e)
+
+on:
+  push:
+    branches: ["main"]
+
+concurrency:
+  group: prod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test_deploy_e2e_prod:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: backend
+      PROD_API_BASE_URL: ${{ secrets.PROD_API_BASE_URL }}
+      PROD_WEB_URL: ${{ secrets.PROD_WEB_URL }}
+      PROD_MODEL_STAGE: ${{ secrets.PROD_MODEL_STAGE }}
+      PROD_MODEL_NAME: ${{ secrets.PROD_MODEL_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # Backend deps (adapt paths if needed)
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+          if [ -f backend/requirements-dev.txt ]; then pip install -r backend/requirements-dev.txt; fi
+          pip install pytest
+
+      - name: Run unit + integration tests (exclude e2e)
+        run: |
+          pytest -q -m "not e2e"
+
+      - name: Trigger Render deploy (api-prod)
+        env:
+          HOOK: ${{ secrets.PROD_API_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "Missing PROD_API_DEPLOY_HOOK"; exit 1; fi
+          curl -fsSL -X POST "$HOOK" > /dev/null
+
+      - name: Trigger Render deploy (web-prod)
+        env:
+          HOOK: ${{ secrets.PROD_WEB_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "Missing PROD_WEB_DEPLOY_HOOK"; exit 1; fi
+          curl -fsSL -X POST "$HOOK" > /dev/null
+
+      - name: Wait for prod API health
+        run: |
+          if [ -z "$PROD_API_BASE_URL" ]; then echo "Missing PROD_API_BASE_URL"; exit 1; fi
+
+          url="${PROD_API_BASE_URL%/}/health"
+          echo "Waiting for: $url"
+
+          attempts=10
+          delay=5
+
+          for i in $(seq 1 $attempts); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$url" || true)
+            echo "Attempt $i/$attempts -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              echo "API is healthy."
+              break
+            fi
+
+            if [ "$i" = "$attempts" ]; then
+              echo "API did not become healthy in time."
+              exit 1
+            fi
+
+            echo "Sleeping ${delay}s..."
+            sleep $delay
+            delay=$((delay*2))
+          done
+
+      - name: Run live E2E tests against prod
+        run: |
+          pytest -q tests/e2e/test_prod_live.py
