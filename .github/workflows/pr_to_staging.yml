@@ -33,6 +33,8 @@ jobs:
           if [ -f ml/requirements.txt ]; then pip install -r ml/requirements.txt; fi
 
       - name: Run unit + integration (exclude e2e)
+        env:
+          PROD_API_URL: ${{ secrets.PROD_API_URL }}
         run: |
           pytest -q -m "not e2e"
 
