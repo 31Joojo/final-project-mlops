@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: backend
-      PROD_API_BASE_URL: ${{ secrets.PROD_API_BASE_URL }}
+      PROD_API_URL: ${{ secrets.PROD_API_URL }}
       PROD_WEB_URL: ${{ secrets.PROD_WEB_URL }}
       PROD_MODEL_STAGE: ${{ secrets.PROD_MODEL_STAGE }}
       PROD_MODEL_NAME: ${{ secrets.PROD_MODEL_NAME }}
@@ -38,7 +38,7 @@ jobs:
 
       - name: Run unit + integration tests (exclude e2e)
         run: |
-          pytest -q -m "not e2e"
+          pytest -q tests/unit tests/integration
 
       - name: Trigger Render deploy (api-prod)
         env:
@@ -56,9 +56,9 @@ jobs:
 
       - name: Wait for prod API health
         run: |
-          if [ -z "$PROD_API_BASE_URL" ]; then echo "Missing PROD_API_BASE_URL"; exit 1; fi
+          if [ -z "$PROD_API_URL" ]; then echo "Missing PROD_API_URL"; exit 1; fi
 
-          url="${PROD_API_BASE_URL%/}/health"
+          url="${PROD_API_URL%/}/health"
           echo "Waiting for: $url"
 
           attempts=10
