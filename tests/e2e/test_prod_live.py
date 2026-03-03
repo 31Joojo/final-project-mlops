@@ -1,17 +1,15 @@
 """
-tests/e2e/test_staging_live.py
+tests/e2e/test_prod_live.py
 
 Authors:
     BAUDET Quentin
     CARDONA Quentin
     LARMAILLARD-NOIREN Joris
 """
-### Modules importation
 import os
 import datetime as dt
 import pytest
 import requests
-
 
 pytestmark = pytest.mark.e2e
 
@@ -19,19 +17,18 @@ pytestmark = pytest.mark.e2e
 ### Helper : _base_url()
 def _base_url() -> str:
     """
-    Retrieves the staging API base URL from environment variables.
+    Retrieves the production API base URL from environment variables.
 
     :param:
         None
 
     :return:
-        str: base URL of the staging API without trailing slash
+        str: base URL of the production API without trailing slash
     """
     ### Read base URL from environment
-    base = os.getenv("STAGING_API_BASE_URL")
+    base = os.getenv("PROD_API_BASE_URL")
     if not base:
-        pytest.skip("STAGING_API_BASE_URL not set: skipping live E2E test")
-
+        raise RuntimeError("PROD_API_BASE_URL not set: cannot run prod live E2E test")
     return base.rstrip("/")
 
 ### Helper : _pick()
@@ -57,9 +54,9 @@ def _pick(options: dict, keys: list[str], fallback):
 
 ### ------------------------------- Tests ------------------------------- ###
 ### Test : test_staging_health_options_predict()
-def test_staging_health_options_predict():
+def test_prod_health_options_predict():
     """
-    End-to-end live test against the staging API.
+    End-to-end live test against the production API.
 
     This test verifies:
         - /health endpoint availability
@@ -74,7 +71,7 @@ def test_staging_health_options_predict():
         None: asserts correct staging API behavior
     """
     base = _base_url()
-    timeout = float(os.getenv("E2E_HTTP_TIMEOUT", "10"))
+    timeout = float(os.getenv("E2E_HTTP_TIMEOUT", "15"))
 
     ### Test /health endpoint
     r = requests.get(f"{base}/health", timeout=timeout)
@@ -94,7 +91,7 @@ def test_staging_health_options_predict():
     product = _pick(options, ["Product", "product"], "Dark Chocolate")
 
     ### Stable date features
-    d = dt.date(2026, 2, 27)
+    d = dt.date(2026, 3, 3)
     date_str = d.isoformat()
 
     ### Try multiple payload formats for compatibility
@@ -131,3 +128,7 @@ def test_staging_health_options_predict():
     assert 0.0 <= float(out["probability"]) <= 1.0
     assert "model_name" in out
     assert "model_stage" in out
+
+    ### Prod-specific expectation
+    expected_stage = os.getenv("PROD_MODEL_STAGE", "Production")
+    assert str(out["model_stage"]) == expected_stage
