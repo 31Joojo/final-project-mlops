@@ -20,15 +20,15 @@ from typing import Any, Dict, Optional, Tuple
 import mlflow
 from mlflow.tracking import MlflowClient
 
-import numpy as np
 import pandas as pd
+import numpy as np
 
-from sklearn.compose import ColumnTransformer
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from ml.training.train import load_chocolate_sales, build_pipeline
+from ml.training.utils import get_git_commit, get_dvc_data_rev, get_env
+from mlflow.models import infer_signature
+from sklearn.metrics import accuracy_score, f1_score, roc_auc_score
 from sklearn.model_selection import train_test_split
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
 
 try:
     import yaml
@@ -333,117 +333,168 @@ def _train_log_register(
     model_name: str,
     experiment_name: str,
     data_path: str,
-    label_quantile: float,
+    label_strategy: str,
     set_stage: str,
     set_alias: bool,
 ) -> TrainOutputs:
     """
-    Executes the full training, logging, registration and promotion workflow.
+    Executes end-to-end candidate training and registration workflow.
 
-    Steps:
-        - load dataset
-        - detect schema
-        - build features and labels
-        - train Logistic Regression pipeline
-        - log params, metrics, and tags to mlflow
-        - register model version
-        - transition model to target stage
-        - optionally set alias
-        - tag model version for traceability
+    This function:
+        - configures mlflow tracking and registry from environment
+        - loads and preprocesses the dataset
+        - builds training labels based on selected strategy
+        - trains a Logistic Regression pipeline
+        - logs metrics, params, and traceability metadata
+        - registers a new model version
+        - transitions it to the desired stage
+        - optionally assigns a registry alias
 
     :param:
         model_name str: registered mlflow model name
         experiment_name str: mlflow experiment name
         data_path str: path to training dataset
-        label_quantile float: quantile used to define positive class
+        label_strategy str: labeling strategy ("median", "p75", "p90")
         set_stage str: stage to transition the model to
-        set_alias bool: whether to set registry alias
+        set_alias bool: whether to assign a registry alias
 
     :return:
-        TrainOutputs: run id, model version and computed metrics
+        TrainOutputs: run id, model version, and computed metrics
     """
-    ### Load dataset
-    df = pd.read_csv(data_path)
 
-    ### Detect date and target columns automatically
-    date_col, target_col = _detect_columns(df)
+    ### Mlflow configuration from environment
+    tracking_uri = get_env("MLFLOW_TRACKING_URI")
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
 
-    ### Build feature matrix X and binary target y
-    X, y, meta = _build_training_frame(df, date_col, target_col, label_quantile)
+    registry_uri = get_env("MLFLOW_REGISTRY_URI")
+    if registry_uri:
+        mlflow.set_registry_uri(registry_uri)
 
-    ### Split dataset into train/test sets
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+    exp_name = get_env("MLFLOW_EXPERIMENT_NAME", experiment_name) or experiment_name
+    mlflow.set_experiment(exp_name)
+
+    ### Load and preprocess dataset
+    df = load_chocolate_sales(data_path)
+    df = df.dropna(subset=["Amount"]).reset_index(drop=True)
+
+    ### Label creation
+    amount = df["Amount"]
+    if label_strategy == "median":
+        thr = float(np.nanmedian(amount))
+    elif label_strategy == "p75":
+        thr = float(np.nanquantile(amount, 0.75))
+    elif label_strategy == "p90":
+        thr = float(np.nanquantile(amount, 0.90))
+    else:
+        raise ValueError(f"Unknown label_strategy={label_strategy}")
+
+    df["high_amount"] = (df["Amount"] >= thr).astype(int)
+
+    feature_cols = [
+        "Sales Person",
+        "Country",
+        "Product",
+        "Boxes Shipped",
+        "year",
+        "month",
+        "dayofweek",
+        "quarter",
+        "weekofyear",
+    ]
+
+    X = df[feature_cols].copy()
+    y = df["high_amount"].copy()
+
+    ### Guardrail: ensure binary classification is valid
+    if y.nunique() < 2:
+        raise RuntimeError(
+            f"Training label has only one class "
+            f"(distribution={y.value_counts().to_dict()})."
+        )
+
+    ### Train/validation split
+    test_size = float(get_env("TRAIN_TEST_SIZE", "0.2"))
+    random_state = int(get_env("TRAIN_RANDOM_STATE", "42"))
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X,
+        y,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=y if y.nunique() > 1 else None,
     )
 
-    ### Build preprocessing pipeline
-    preprocess = ColumnTransformer(
-        transformers=[
-            ("num", Pipeline([("scaler", StandardScaler())]), meta["num_cols"]),
-            ("cat", Pipeline([("onehot", OneHotEncoder(handle_unknown="ignore"))]), meta["cat_cols"]),
-        ],
-        remainder="drop",
+    ### Build pipeline
+    class_weight_env = get_env("TRAIN_CLASS_WEIGHT", "none")
+    class_weight = None if class_weight_env == "none" else "balanced"
+
+    C = float(get_env("TRAIN_C", "1.0"))
+    penalty = get_env("TRAIN_PENALTY", "l2")
+
+    onehot_min_frequency = get_env("TRAIN_ONEHOT_MIN_FREQUENCY", "")
+    onehot_min_frequency = None if onehot_min_frequency in ("", "0", None) else float(onehot_min_frequency)
+
+    onehot_max_categories = get_env("TRAIN_ONEHOT_MAX_CATEGORIES", "")
+    onehot_max_categories = None if onehot_max_categories in ("", "0", None) else int(onehot_max_categories)
+
+    pipe = build_pipeline(
+        X_train,
+        random_state=random_state,
+        C=C,
+        penalty=penalty,
+        class_weight=class_weight_env if class_weight else None,
+        onehot_min_frequency=onehot_min_frequency,
+        onehot_max_categories=onehot_max_categories,
     )
 
-    ### Define classifier
-    clf = LogisticRegression(max_iter=2000)
+    ### Training and mlflow logging
+    with mlflow.start_run(run_name=model_name) as run:
 
-    ### Combine preprocessing and classifier
-    pipe = Pipeline([("preprocess", preprocess), ("clf", clf)])
+        ### Traceability tags
+        mlflow.set_tag("git_commit", get_git_commit())
+        mlflow.set_tag("dvc_data_rev", get_dvc_data_rev(data_path))
+        mlflow.set_tag("dataset_path", data_path)
+        mlflow.set_tag("run_tag", "candidate")
 
-    ### Configure mlflow experiment
-    mlflow.set_experiment(experiment_name)
-
-    ### Collect traceability information
-    git_sha = _git_sha()
-    dvc_md5 = _read_dvc_md5(Path(f"{data_path}.dvc"))
-
-    ### Start mlflow
-    with mlflow.start_run() as run:
-        ### Train model
-        pipe.fit(X_train, y_train)
-
-        ### Evaluate on test set
-        y_pred = pipe.predict(X_test)
-
-        ### Compute evaluation metrics
-        metrics = {
-            "f1": float(f1_score(y_test, y_pred)),
-            "accuracy": float(accuracy_score(y_test, y_pred)),
-            "precision": float(precision_score(y_test, y_pred, zero_division=0)),
-            "recall": float(recall_score(y_test, y_pred, zero_division=0)),
-        }
-
-        ### Log training parameters
+        ### Log hyperparameters
         mlflow.log_params(
             {
-                "model_family": "logreg",
-                "label_quantile": label_quantile,
-                "label_threshold": meta["label_threshold"],
-                "cat_cols": ",".join(meta["cat_cols"]),
-                "num_cols": ",".join(meta["num_cols"]),
+                "model": "LogisticRegression",
+                "solver": "liblinear",
+                "max_iter": 1000,
+                "test_size": test_size,
+                "random_state": random_state,
+                "label_strategy": label_strategy,
+                "amount_threshold": thr,
+                "target": "high_amount",
+                "C": C,
+                "penalty": penalty,
+                "class_weight": class_weight_env,
+                "onehot_min_frequency": onehot_min_frequency or 0.0,
+                "onehot_max_categories": onehot_max_categories or 0,
             }
         )
 
-        ### Log evaluation metrics
+        ### Train model
+        pipe.fit(X_train, y_train)
+
+        ### Evaluate model
+        y_pred = pipe.predict(X_val)
+        y_proba = pipe.predict_proba(X_val)[:, 1]
+
+        metrics = {
+            "accuracy": float(accuracy_score(y_val, y_pred)),
+            "f1": float(f1_score(y_val, y_pred)),
+            "roc_auc": float(roc_auc_score(y_val, y_proba)),
+        }
+
         mlflow.log_metrics(metrics)
 
-        ### Add traceability tags
-        mlflow.set_tag("git_sha", git_sha)
-        mlflow.set_tag("data_path", data_path)
-        if dvc_md5:
-            mlflow.set_tag("dvc_md5", dvc_md5)
-
-        ### Prepare model signature for deployment validation
+        ### Log model artifact and register version
+        signature = infer_signature(X_val, y_proba)
         input_example = X_train.head(5)
-        try:
-            from mlflow.models.signature import infer_signature
 
-            signature = infer_signature(input_example, pipe.predict(input_example))
-        except Exception:
-            signature = None
-
-        ### Log model artifact and register new model version
         mlflow.sklearn.log_model(
             sk_model=pipe,
             artifact_path="model",
@@ -452,18 +503,14 @@ def _train_log_register(
             input_example=input_example,
         )
 
-        ### Store mlflow run id
         run_id = run.info.run_id
 
-    ### Resolve model version from registry
+    ### Resolve registered model version
     client = MlflowClient()
     model_version = None
 
-    ### Poll registry because it can be eventually consistent
     for _ in range(30):
         versions = client.search_model_versions(f"name = '{model_name}'")
-
-        ### Identify version linked to this run
         for v in versions:
             if getattr(v, "run_id", None) == run_id:
                 model_version = str(v.version)
@@ -472,9 +519,8 @@ def _train_log_register(
             break
         time.sleep(2)
 
-    ### Fail if version could not be resolved
     if not model_version:
-        raise RuntimeError("Could not resolve model version after registration (search_model_versions returned none).")
+        raise RuntimeError("Could not resolve model version after registration.")
 
     ### Stage transition
     if set_stage:
@@ -485,29 +531,33 @@ def _train_log_register(
             archive_existing_versions=True,
         )
 
-    ### Set alias if mlflow version doesn't support aliases => we ignore
+    ### Optional alias
     if set_alias and hasattr(client, "set_registered_model_alias"):
         try:
-            ### Common alias names staging or production
-            client.set_registered_model_alias(name=model_name, alias="staging", version=model_version)
+            client.set_registered_model_alias(
+                name=model_name,
+                alias="staging",
+                version=model_version,
+            )
         except Exception:
-            ### Ignore alias errors
             pass
 
-    ### Tag model version for traceability
-    client.set_model_version_tag(model_name, model_version, "git_sha", git_sha)
-    client.set_model_version_tag(model_name, model_version, "data_path", data_path)
-
-    if dvc_md5:
-        client.set_model_version_tag(model_name, model_version, "dvc_md5", dvc_md5)
+    ### Tag version with metrics for gates
     client.set_model_version_tag(model_name, model_version, "run_id", run_id)
 
-    ### Attach metric values as tags
     for k, v in metrics.items():
-        client.set_model_version_tag(model_name, model_version, f"metric.{k}", f"{v:.6f}")
+        client.set_model_version_tag(
+            model_name,
+            model_version,
+            f"metric.{k}",
+            f"{v:.6f}",
+        )
 
-    ### Return structured outputs
-    return TrainOutputs(run_id=run_id, model_version=model_version, metrics=metrics)
+    return TrainOutputs(
+        run_id=run_id,
+        model_version=model_version,
+        metrics=metrics,
+    )
 
 ### Helper : _write_github_outputs()
 def _write_github_outputs(run_id: str, model_version: str) -> None:
@@ -555,7 +605,7 @@ def main() -> None:
     parser.add_argument("--model-name", default=os.getenv("MODEL_NAME", "chocolate_sales_logreg"))
     parser.add_argument("--experiment-name", default=os.getenv("MLFLOW_EXPERIMENT", "chocolate-sales"))
     parser.add_argument("--data-path", default="data/raw/chocolate_sales.csv")
-    parser.add_argument("--label-quantile", type=float, default=float(os.getenv("LABEL_QUANTILE", "0.5")))
+    parser.add_argument("--label-strategy", default=os.getenv("LABEL_STRATEGY", "median"), choices=["median", "p75", "p90"])
     parser.add_argument("--set-stage", default=os.getenv("CANDIDATE_STAGE", "Staging"))
     parser.add_argument("--set-alias", action="store_true", default=os.getenv("SET_ALIAS", "1") == "1")
     parser.add_argument("--output-json", default=os.getenv("PROMOTION_OUTPUT_JSON", "ml/promotion/outputs.json"))
@@ -569,7 +619,7 @@ def main() -> None:
         model_name=args.model_name,
         experiment_name=args.experiment_name,
         data_path=args.data_path,
-        label_quantile=args.label_quantile,
+        label_strategy=args.label_strategy,
         set_stage=args.set_stage,
         set_alias=args.set_alias,
     )
