@@ -72,44 +72,66 @@ def _run(cmd: list[str], *, cwd: Optional[str] = None) -> None:
 ### Helper : _ensure_dvc_pull()
 def _ensure_dvc_pull(data_path: str) -> None:
     """
-    DVC pull with DagsHub storage using HTTP basic auth.
-    Expects DAGSHUB_USERNAME + DAGSHUB_TOKEN in env.
-    Uses --local so nothing is committed.
+    Synchronizes the local dataset with the remote dvc storage using HTTP basic authentication.
+
+    This function:
+        - configures DVC remote credentials locally
+        - ensures the correct DVC binary is used
+        - pulls the specified dataset from remote storage
+
+    :param:
+        data_path str: path to the dvc-tracked dataset file
+
+    :return:
+        None
+
+    :raises:
+        RuntimeError: if required DagsHub credentials are missing
     """
-    ### Retrieve configured DVC remote name
+    ### Retrieve dvc remote name
     dvc_remote = os.getenv("DVC_REMOTE", "origin")
 
-    ### Retrieve DagsHub credentials from environment
+    ### Retrieve dagshub credentials from environment
     user = os.getenv("DAGSHUB_USERNAME")
     token = os.getenv("DAGSHUB_TOKEN")
 
     ### Ensure required credentials are present
     if not user or not token:
-        raise RuntimeError("Missing DAGSHUB_USERNAME and/or DAGSHUB_TOKEN environment variables.")
+        raise RuntimeError(
+            "Missing DAGSHUB_USERNAME and/or DAGSHUB_TOKEN environment variables."
+        )
 
-    ### Prepare environment variables for non-interactive execution
+    ### Prepare non-interactive execution environment
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["DVC_NO_ANALYTICS"] = "1"
 
-    ### Helper to execute dvc commands locally with modified environment
-    ### Helper : run_local()
+    ### Force usage of pip-installed dvc
+    dvc = [sys.executable, "-m", "dvc"]
+
+    ### Helper to execute dvc commands with controlled environment
     def run_local(args: list[str]) -> None:
         subprocess.run(args, check=True, text=True, env=env)
 
-    ### Configure remote authentication
-    ### Try setting auth=basic then fallback to user/password only
+    ### Clean any leftover local dvc config that could cause parsing issues
+    cfg_local = Path(".dvc/config.local")
+    if cfg_local.exists():
+        cfg_local.unlink()
+
+    ### Configure remote basic authentication locally
     try:
-        run_local(["dvc", "remote", "modify", dvc_remote, "--local", "auth", "basic"])
+        ### Some dvc versions require explicit auth type
+        run_local(dvc + ["remote", "modify", dvc_remote, "--local", "auth", "basic"])
     except subprocess.CalledProcessError:
+        ### Ignore if auth flag is unsupported
         pass
 
-    run_local(["dvc", "remote", "modify", dvc_remote, "--local", "user", user])
-    run_local(["dvc", "remote", "modify", dvc_remote, "--local", "password", token])
-    run_local(["dvc", "remote", "modify", dvc_remote, "--local", "ask_password", "false"])
+    ### Set remote credentials locally
+    run_local(dvc + ["remote", "modify", dvc_remote, "--local", "user", user])
+    run_local(dvc + ["remote", "modify", dvc_remote, "--local", "password", token])
 
-    ### Pull dataset
-    run_local(["dvc", "pull", data_path, "-q"])
+    ### Pull dataset from remote DVC storage
+    run_local(dvc + ["pull", data_path, "-q"])
 
 ### Helper : _git_sha()
 def _git_sha() -> str:
