@@ -70,15 +70,84 @@ def _run(cmd: list[str], *, cwd: Optional[str] = None) -> None:
     subprocess.run(cmd, cwd=cwd, check=True, text=True)
 
 ### Helper : _ensure_dvc_pull()
+### def _ensure_dvc_pull(data_path: str) -> None:
+###     """
+###     Synchronizes the local dataset with DVC remote storage using a CI-dedicated remote.
+###
+###     This function:
+###         - creates a temporary local DVC remote named "ci"
+###         - configures HTTP basic authentication using environment credentials
+###         - pulls the specified dataset from DagsHub storage
+###         - avoids modifying repository-level DVC remotes
+###
+###     :param:
+###         data_path str: path to the DVC-tracked dataset file
+###
+###     :return:
+###         None
+###
+###     :raises:
+###         RuntimeError: if required environment variables are missing
+###     """
+###     ### Retrieve required credentials and remote URL
+###     user = os.getenv("DAGSHUB_USERNAME")
+###     token = os.getenv("DAGSHUB_TOKEN")
+###     remote_url = os.getenv("DVC_REMOTE_URL")
+###
+###     if not user or not token:
+###         raise RuntimeError("Missing DAGSHUB_USERNAME and/or DAGSHUB_TOKEN.")
+###     if not remote_url:
+###         raise RuntimeError(
+###             "Missing DVC_REMOTE_URL (HTTP URL to DagsHub DVC storage)."
+###         )
+###
+###     ### Prepare non-interactive execution environment
+###     env = os.environ.copy()
+###     env["GIT_TERMINAL_PROMPT"] = "0"
+###     env["DVC_NO_ANALYTICS"] = "1"
+###
+###     ### Force usage of pip-installed dvc to avoid path conflicts
+###     dvc = [sys.executable, "-m", "dvc"]
+###
+###     ### Helper to execute dvc commands with controlled environment
+###     def run_local(args: list[str]) -> None:
+###         subprocess.run(args, check=True, text=True, env=env)
+###
+###     ### Reset local dvc config to avoid schema or parsing conflicts
+###     cfg_local = Path(".dvc/config.local")
+###     if cfg_local.exists():
+###         cfg_local.unlink()
+###
+###     ### Create ci-only remote named ci
+###     run_local(dvc + ["remote", "add", "-f", "--local", "ci", remote_url])
+###
+###     ### Configure HTTP basic authentication for ci remote
+###     try:
+###         run_local(dvc + ["remote", "modify", "ci", "--local", "auth", "basic"])
+###     except subprocess.CalledProcessError:
+###         pass
+###
+###     ### Set credentials for ci remote
+###     run_local(dvc + ["remote", "modify", "ci", "--local", "user", user])
+###     run_local(dvc + ["remote", "modify", "ci", "--local", "password", token])
+###
+###     ### Disable interactive password prompts when supported
+###     try:
+###         run_local(dvc + ["remote", "modify", "ci", "--local", "ask_password", "false"])
+###     except subprocess.CalledProcessError:
+###         pass
+###
+###     ### Pull dataset explicitly using ci remote
+###     run_local(dvc + ["pull", data_path, "-vv"])
 def _ensure_dvc_pull(data_path: str) -> None:
     """
-    Synchronizes the local dataset with DVC remote storage using a CI-dedicated remote.
+    Synchronizes the local dataset from an S3-compatible DVC remote (e.g., DagsHub Storage).
 
-    This function:
-        - creates a temporary local DVC remote named "ci"
-        - configures HTTP basic authentication using environment credentials
-        - pulls the specified dataset from DagsHub storage
-        - avoids modifying repository-level DVC remotes
+    This function expects AWS credentials to be available in the environment:
+        - AWS_ACCESS_KEY_ID
+        - AWS_SECRET_ACCESS_KEY
+
+    It performs a DVC pull using the pip-installed DVC binary.
 
     :param:
         data_path str: path to the DVC-tracked dataset file
@@ -87,58 +156,27 @@ def _ensure_dvc_pull(data_path: str) -> None:
         None
 
     :raises:
-        RuntimeError: if required environment variables are missing
+        subprocess.CalledProcessError: if the DVC pull command fails
     """
-    ### Retrieve required credentials and remote URL
-    user = os.getenv("DAGSHUB_USERNAME")
-    token = os.getenv("DAGSHUB_TOKEN")
-    remote_url = os.getenv("DVC_REMOTE_URL")
+    import sys
+    import subprocess
+    import os
 
-    if not user or not token:
-        raise RuntimeError("Missing DAGSHUB_USERNAME and/or DAGSHUB_TOKEN.")
-    if not remote_url:
-        raise RuntimeError(
-            "Missing DVC_REMOTE_URL (HTTP URL to DagsHub DVC storage)."
-        )
-
-    ### Prepare non-interactive execution environment
+    ### Prepare non-interactive environment
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["DVC_NO_ANALYTICS"] = "1"
 
-    ### Force usage of pip-installed dvc to avoid path conflicts
+    ### Force usage of pip-installed dvc
     dvc = [sys.executable, "-m", "dvc"]
 
-    ### Helper to execute dvc commands with controlled environment
-    def run_local(args: list[str]) -> None:
-        subprocess.run(args, check=True, text=True, env=env)
-
-    ### Reset local dvc config to avoid schema or parsing conflicts
-    cfg_local = Path(".dvc/config.local")
-    if cfg_local.exists():
-        cfg_local.unlink()
-
-    ### Create ci-only remote named ci
-    run_local(dvc + ["remote", "add", "-f", "--local", "ci", remote_url])
-
-    ### Configure HTTP basic authentication for ci remote
-    try:
-        run_local(dvc + ["remote", "modify", "ci", "--local", "auth", "basic"])
-    except subprocess.CalledProcessError:
-        pass
-
-    ### Set credentials for ci remote
-    run_local(dvc + ["remote", "modify", "ci", "--local", "user", user])
-    run_local(dvc + ["remote", "modify", "ci", "--local", "password", token])
-
-    ### Disable interactive password prompts when supported
-    try:
-        run_local(dvc + ["remote", "modify", "ci", "--local", "ask_password", "false"])
-    except subprocess.CalledProcessError:
-        pass
-
-    ### Pull dataset explicitly using ci remote
-    run_local(dvc + ["pull", "-r", "ci", data_path, "-q"])
+    ### Execute dvc pull
+    subprocess.run(
+        dvc + ["pull", data_path, "-v"],
+        check=True,
+        text=True,
+        env=env,
+    )
 
 ### Helper : _git_sha()
 def _git_sha() -> str:
