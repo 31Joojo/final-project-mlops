@@ -26,9 +26,9 @@ def _base_url() -> str:
         str: base URL of the production API without trailing slash
     """
     ### Read base URL from environment
-    base = os.getenv("PROD_API_BASE_URL")
+    base = os.getenv("PROD_API_URL")
     if not base:
-        raise RuntimeError("PROD_API_BASE_URL not set: cannot run prod live E2E test")
+        raise RuntimeError("PROD_API_URL not set: cannot run prod live E2E test")
     return base.rstrip("/")
 
 ### Helper : _pick()
@@ -53,7 +53,7 @@ def _pick(options: dict, keys: list[str], fallback):
     return fallback
 
 ### ------------------------------- Tests ------------------------------- ###
-### Test : test_staging_health_options_predict()
+### Test : test_prod_health_options_predict()
 def test_prod_health_options_predict():
     """
     End-to-end live test against the production API.
@@ -68,7 +68,7 @@ def test_prod_health_options_predict():
         None
 
     :return:
-        None: asserts correct staging API behavior
+        None: asserts correct production API behavior
     """
     base = _base_url()
     timeout = float(os.getenv("E2E_HTTP_TIMEOUT", "15"))
