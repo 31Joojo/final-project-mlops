@@ -256,8 +256,8 @@ def main() -> None:
         "year",
         "month",
         "dayofweek",
-        "quarter",
-        "weekofyear",
+        ## "quarter",
+        ## "weekofyear",
     ]
     X = df[feature_cols].copy()
     y = df["high_amount"].copy()
