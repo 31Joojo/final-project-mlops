@@ -399,8 +399,8 @@ def _train_log_register(
         "year",
         "month",
         "dayofweek",
-        "quarter",
-        "weekofyear",
+        ## "quarter",
+        ## "weekofyear",
     ]
 
     X = df[feature_cols].copy()
