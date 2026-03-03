@@ -26,8 +26,9 @@ jobs:
 
       AWS_ACCESS_KEY_ID: ${{ secrets.DAGSHUB_USERNAME }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.DAGSHUB_TOKEN }}
-      AWS_DEFAULT_REGION: us-east-1
+      AWS_S3_ADDRESSING_STYLE: path
       AWS_EC2_METADATA_DISABLED: "true"
+      AWS_DEFAULT_REGION: us-east-1
 
       MODEL_NAME: chocolate_sales_logreg
 
