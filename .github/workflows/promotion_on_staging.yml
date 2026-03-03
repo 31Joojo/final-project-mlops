@@ -1,0 +1,147 @@
+name: Promotion pipeline on staging
+
+on:
+  push:
+    branches: ["staging"]
+
+concurrency:
+  group: promotion-staging
+  cancel-in-progress: true
+
+jobs:
+  train_register:
+    runs-on: ubuntu-latest
+    outputs:
+      model_version: ${{ steps.train.outputs.model_version }}
+      run_id: ${{ steps.train.outputs.run_id }}
+
+    env:
+      DAGSHUB_USERNAME: ${{ secrets.DAGSHUB_USERNAME }}
+      DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+      DVC_REMOTE_URL: ${{ secrets.DVC_REMOTE_URL }}
+
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+
+      AWS_ACCESS_KEY_ID: ${{ secrets.DAGSHUB_TOKEN }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.DAGSHUB_TOKEN }}
+      AWS_S3_ADDRESSING_STYLE: path
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_DEFAULT_REGION: us-east-1
+
+      MODEL_NAME: chocolate_sales_logreg
+
+      SET_ALIAS: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ml/requirements.txt
+          pip install --upgrade --force-reinstall "dvc[http]" dvc-http pyyaml requests
+          python -m dvc --version
+
+      - name: Debug DVC config (safe)
+        run: |
+          python -m dvc --version
+          cat .dvc/config || true
+
+      - name: Train + register candidate (DVC pull included)
+        id: train
+        run: |
+          python -m ml.promotion.train_and_register \
+            --model-name "${MODEL_NAME}" \
+            --experiment-name "chocolate-sales" \
+            --data-path "data/raw/chocolate_sales.csv" \
+            --set-stage "Staging" \
+            --output-json "ml/promotion/outputs.json"
+
+  deploy_staging:
+    runs-on: ubuntu-latest
+    needs: [train_register]
+
+    env:
+      STAGING_API_DEPLOY_HOOK: ${{ secrets.STAGING_API_DEPLOY_HOOK }}
+      STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+
+    steps:
+      - name: Trigger Render deploy (API)
+        run: |
+          curl -fsS -X POST "${STAGING_API_DEPLOY_HOOK}"
+
+      - name: Wait for /health (retry/backoff)
+        run: |
+          set -e
+
+          if [ -z "${STAGING_API_URL:-}" ]; then
+            echo "Missing STAGING_API_URL secret (should be like https://xxx.onrender.com)"
+            exit 1
+          fi
+          
+          url="${STAGING_API_URL%/}/health"
+          echo "Checking $url ..."
+          
+          for delay in 5 10 20 30 45 60 60 60; do
+            if curl -fsS "$url" > /dev/null; then
+              echo "Staging is healthy"
+              exit 0
+            fi
+            echo "Not ready yet, sleeping ${delay}s..."
+            sleep "$delay"
+          done
+          
+          echo "Staging did not become healthy in time"
+          exit 1
+
+  gates_promote:
+    runs-on: ubuntu-latest
+    needs: [train_register, deploy_staging]
+
+    env:
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+
+      MODEL_NAME: chocolate_sales_logreg
+      MODEL_VERSION: ${{ needs.train_register.outputs.model_version }}
+      RUN_ID: ${{ needs.train_register.outputs.run_id }}
+
+      STAGING_API_URL: ${{ secrets.STAGING_API_URL }}
+
+      GATE_MIN_F1: ${{ secrets.GATE_MIN_F1 }}
+      GATE_MAX_P95_MS: ${{ secrets.GATE_MAX_P95_MS }}
+      GATE_LATENCY_N: ${{ secrets.GATE_LATENCY_N }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ml/requirements.txt
+          pip install "dvc[http]==3.5.0" dvc-http
+          pip install requests numpy
+
+      - name: Run gates + promote if PASS
+        run: |
+          echo "Candidate: ${MODEL_NAME} v${MODEL_VERSION} (run_id=${RUN_ID})"
+          python -m ml.promotion.gates_and_promote \
+            --model-name "${MODEL_NAME}" \
+            --model-version "${MODEL_VERSION}" \
+            --run-id "${RUN_ID}" \
+            --staging-url "${STAGING_API_URL}"

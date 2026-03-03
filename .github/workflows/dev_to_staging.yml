@@ -1,0 +1,109 @@
+name: Dev to Staging - Deploy + Live E2E
+
+on:
+  push:
+    branches: ["staging"]
+  workflow_dispatch:
+
+concurrency:
+  group: staging
+  cancel-in-progress: true
+
+jobs:
+  deploy_and_e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    env:
+      STAGING_API_BASE_URL: ${{ secrets.STAGING_API_BASE_URL }}
+      STAGING_API_DEPLOY_HOOK: ${{ secrets.STAGING_API_DEPLOY_HOOK }}
+      STAGING_WEB_DEPLOY_HOOK: ${{ secrets.STAGING_WEB_DEPLOY_HOOK }}
+
+      E2E_HTTP_TIMEOUT: "12"
+      E2E_MAX_WAIT_SECONDS: "420"
+      E2E_POLL_SECONDS: "5"
+
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+      MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+      MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+
+      MODEL_NAME: ${{ secrets.STAGING_MODEL_NAME }}
+      MODEL_STAGE: ${{ secrets.STAGING_MODEL_STAGE }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies (API + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r apps/api/requirements.txt
+          pip install -r apps/api/requirements-dev.txt
+          if [ -f ml/requirements.txt ]; then pip install -r ml/requirements.txt; fi
+
+      - name: Run unit + integration (exclude e2e)
+        run: |
+          pytest -q -m "not e2e"
+
+      - name: Trigger Render deploy (API)
+        if: ${{ env.STAGING_API_DEPLOY_HOOK != '' }}
+        run: |
+          curl -fsS -X POST "${STAGING_API_DEPLOY_HOOK}"
+
+      - name: Trigger Render deploy (Web)
+        if: ${{ env.STAGING_WEB_DEPLOY_HOOK != '' }}
+        run: |
+          curl -fsS -X POST "${STAGING_WEB_DEPLOY_HOOK}"
+
+      - name: Skip live E2E if STAGING_API_BASE_URL is missing
+        if: ${{ env.STAGING_API_BASE_URL == '' }}
+        run: |
+          echo "STAGING_API_BASE_URL is not set. Skipping live E2E."
+          exit 0
+
+      - name: Wait until staging API is ready (/health + /options)
+        run: |
+          python - <<'PY'
+          import os, time, sys
+          import requests
+
+          base = os.environ["STAGING_API_BASE_URL"].rstrip("/")
+          health = f"{base}/health"
+          options = f"{base}/options"
+
+          max_wait = int(os.getenv("E2E_MAX_WAIT_SECONDS", "420"))
+          poll = float(os.getenv("E2E_POLL_SECONDS", "5"))
+          timeout = float(os.getenv("E2E_HTTP_TIMEOUT", "12"))
+
+          start = time.time()
+          last = None
+
+          def ok(url: str) -> bool:
+            r = requests.get(url, timeout=timeout)
+            return r.status_code == 200
+
+          while time.time() - start < max_wait:
+            try:
+              if ok(health) and ok(options):
+                print("API ready:", base)
+                sys.exit(0)
+            except Exception as e:
+              last = e
+            print(" Waiting for API...", health, options)
+            time.sleep(poll)
+
+          print("Timeout waiting for staging API")
+          if last:
+            print("Last error:", repr(last))
+          sys.exit(1)
+          PY
+
+      - name: Run live E2E tests
+        run: |
+          pytest -q -m e2e
