@@ -49,7 +49,7 @@ jobs:
 
       - name: Run unit + integration (exclude e2e)
         run: |
-          pytest -q -m "not e2e"
+          pytest -q tests/unit tests/integration
 
       - name: Trigger Render deploy (API)
         if: ${{ env.STAGING_API_DEPLOY_HOOK != '' }}
