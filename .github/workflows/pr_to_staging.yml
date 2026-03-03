@@ -35,6 +35,7 @@ jobs:
       - name: Run unit + integration (exclude e2e)
         env:
           PROD_API_URL: ${{ secrets.PROD_API_URL }}
+          PROD_MODEL_STAGE: ${{ secrets.PROD_MODEL_STAGE }}
         run: |
           pytest -q -m "not e2e"
 
