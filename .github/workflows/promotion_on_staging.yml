@@ -24,6 +24,11 @@ jobs:
       MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
       MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
 
+      AWS_ACCESS_KEY_ID: ${{ secrets.DAGSHUB_USERNAME }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.DAGSHUB_TOKEN }}
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+
       MODEL_NAME: chocolate_sales_logreg
 
       SET_ALIAS: "1"
