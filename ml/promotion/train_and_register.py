@@ -98,9 +98,15 @@ def _ensure_dvc_pull(data_path: str) -> None:
         subprocess.run(args, check=True, text=True, env=env)
 
     ### Configure remote authentication
-    run_local(["dvc", "remote", "modify", dvc_remote, "--local", "auth", "basic"])
+    ### Try setting auth=basic then fallback to user/password only
+    try:
+        run_local(["dvc", "remote", "modify", dvc_remote, "--local", "auth", "basic"])
+    except subprocess.CalledProcessError:
+        pass
+
     run_local(["dvc", "remote", "modify", dvc_remote, "--local", "user", user])
     run_local(["dvc", "remote", "modify", dvc_remote, "--local", "password", token])
+    run_local(["dvc", "remote", "modify", dvc_remote, "--local", "ask_password", "false"])
 
     ### Pull dataset
     run_local(["dvc", "pull", data_path, "-q"])
