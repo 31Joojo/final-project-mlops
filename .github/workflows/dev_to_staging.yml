@@ -105,5 +105,8 @@ jobs:
           PY
 
       - name: Run live E2E tests
+        env:
+          PROD_API_URL: ${{ secrets.PROD_API_URL }}
+          PROD_MODEL_STAGE: ${{ secrets.PROD_MODEL_STAGE }}
         run: |
           pytest -q -m e2e
