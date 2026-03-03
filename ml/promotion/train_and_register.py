@@ -72,33 +72,33 @@ def _run(cmd: list[str], *, cwd: Optional[str] = None) -> None:
 ### Helper : _ensure_dvc_pull()
 def _ensure_dvc_pull(data_path: str) -> None:
     """
-    Synchronizes the local dataset with the remote dvc storage using HTTP basic authentication.
+    Synchronizes the local dataset with DVC remote storage using a CI-dedicated remote.
 
     This function:
-        - configures DVC remote credentials locally
-        - ensures the correct DVC binary is used
-        - pulls the specified dataset from remote storage
+        - creates a temporary local DVC remote named "ci"
+        - configures HTTP basic authentication using environment credentials
+        - pulls the specified dataset from DagsHub storage
+        - avoids modifying repository-level DVC remotes
 
     :param:
-        data_path str: path to the dvc-tracked dataset file
+        data_path str: path to the DVC-tracked dataset file
 
     :return:
         None
 
     :raises:
-        RuntimeError: if required DagsHub credentials are missing
+        RuntimeError: if required environment variables are missing
     """
-    ### Retrieve dvc remote name
-    dvc_remote = os.getenv("DVC_REMOTE", "origin")
-
-    ### Retrieve dagshub credentials from environment
+    ### Retrieve required credentials and remote URL
     user = os.getenv("DAGSHUB_USERNAME")
     token = os.getenv("DAGSHUB_TOKEN")
+    remote_url = os.getenv("DVC_REMOTE_URL")
 
-    ### Ensure required credentials are present
     if not user or not token:
+        raise RuntimeError("Missing DAGSHUB_USERNAME and/or DAGSHUB_TOKEN.")
+    if not remote_url:
         raise RuntimeError(
-            "Missing DAGSHUB_USERNAME and/or DAGSHUB_TOKEN environment variables."
+            "Missing DVC_REMOTE_URL (HTTP URL to DagsHub DVC storage)."
         )
 
     ### Prepare non-interactive execution environment
@@ -106,32 +106,39 @@ def _ensure_dvc_pull(data_path: str) -> None:
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["DVC_NO_ANALYTICS"] = "1"
 
-    ### Force usage of pip-installed dvc
+    ### Force usage of pip-installed dvc to avoid path conflicts
     dvc = [sys.executable, "-m", "dvc"]
 
     ### Helper to execute dvc commands with controlled environment
     def run_local(args: list[str]) -> None:
         subprocess.run(args, check=True, text=True, env=env)
 
-    ### Clean any leftover local dvc config that could cause parsing issues
+    ### Reset local dvc config to avoid schema or parsing conflicts
     cfg_local = Path(".dvc/config.local")
     if cfg_local.exists():
         cfg_local.unlink()
 
-    ### Configure remote basic authentication locally
+    ### Create ci-only remote named ci
+    run_local(dvc + ["remote", "add", "-f", "--local", "ci", remote_url])
+
+    ### Configure HTTP basic authentication for ci remote
     try:
-        ### Some dvc versions require explicit auth type
-        run_local(dvc + ["remote", "modify", dvc_remote, "--local", "auth", "basic"])
+        run_local(dvc + ["remote", "modify", "ci", "--local", "auth", "basic"])
     except subprocess.CalledProcessError:
-        ### Ignore if auth flag is unsupported
         pass
 
-    ### Set remote credentials locally
-    run_local(dvc + ["remote", "modify", dvc_remote, "--local", "user", user])
-    run_local(dvc + ["remote", "modify", dvc_remote, "--local", "password", token])
+    ### Set credentials for ci remote
+    run_local(dvc + ["remote", "modify", "ci", "--local", "user", user])
+    run_local(dvc + ["remote", "modify", "ci", "--local", "password", token])
 
-    ### Pull dataset from remote DVC storage
-    run_local(dvc + ["pull", data_path, "-q"])
+    ### Disable interactive password prompts when supported
+    try:
+        run_local(dvc + ["remote", "modify", "ci", "--local", "ask_password", "false"])
+    except subprocess.CalledProcessError:
+        pass
+
+    ### Pull dataset explicitly using ci remote
+    run_local(dvc + ["pull", "-r", "ci", data_path, "-q"])
 
 ### Helper : _git_sha()
 def _git_sha() -> str:
